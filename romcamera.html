@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>ROMカメラ</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+<style>
+
+body{
+font-family:sans-serif;
+text-align:center;
+background:#f5f5f5;
+margin:0;
+padding:10px;
+}
+
+#container{
+position:relative;
+max-width:640px;
+margin:auto;
+}
+
+video{
+width:100%;
+border-radius:10px;
+}
+
+canvas{
+position:absolute;
+top:0;
+left:0;
+width:100%;
+height:100%;
+border-radius:10px;
+}
+
+.panel{
+max-width:640px;
+margin:auto;
+display:flex;
+gap:10px;
+margin-top:10px;
+}
+
+.box{
+flex:1;
+background:white;
+padding:10px;
+border-radius:8px;
+border:1px solid #ddd;
+text-align:left;
+font-size:14px;
+}
+
+.manual{
+color:#d63031;
+font-size:18px;
+font-weight:bold;
+}
+
+button{
+margin-top:10px;
+padding:10px;
+font-size:16px;
+border:none;
+border-radius:8px;
+background:#2c7be5;
+color:white;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<h2>AI & 手動 ROMカメラ</h2>
+
+<div id="container">
+
+<video id="video" autoplay playsinline></video>
+
+<canvas id="canvas"></canvas>
+
+</div>
+
+<div class="panel">
+
+<div class="box">
+
+<strong>AI自動測定</strong><br><br>
+
+右肘: <span id="re">--</span>°<br>
+左肘: <span id="le">--</span>°<br><br>
+
+右膝: <span id="rk">--</span>°<br>
+左膝: <span id="lk">--</span>°<br>
+
+</div>
+
+<div class="box">
+
+<strong>手動測定</strong><br><br>
+
+<span class="manual" id="manualText">
+
+3点タップしてください
+
+</span><br>
+
+<button onclick="resetManual()">
+
+リセット
+
+</button>
+
+</div>
+
+</div>
+
+<script>
+
+const video=document.getElementById("video");
+const canvas=document.getElementById("canvas");
+const ctx=canvas.getContext("2d");
+
+const re=document.getElementById("re");
+const le=document.getElementById("le");
+const rk=document.getElementById("rk");
+const lk=document.getElementById("lk");
+
+const manualText=document.getElementById("manualText");
+
+let manualPoints=[];
+
+let maxAngles={
+re:0,
+le:0,
+rk:0,
+lk:0
+};
+
+function calculateAngle(A,B,C){
+
+const BA={x:A.x-B.x,y:A.y-B.y};
+const BC={x:C.x-B.x,y:C.y-B.y};
+
+const dot=BA.x*BC.x+BA.y*BC.y;
+
+const magBA=Math.hypot(BA.x,BA.y);
+const magBC=Math.hypot(BC.x,BC.y);
+
+if(magBA===0||magBC===0) return 0;
+
+let angle=Math.acos(dot/(magBA*magBC));
+
+return angle*180/Math.PI;
+
+}
+
+canvas.addEventListener("pointerdown",function(e){
+
+const rect=canvas.getBoundingClientRect();
+
+const scaleX=canvas.width/rect.width;
+const scaleY=canvas.height/rect.height;
+
+const x=(e.clientX-rect.left)*scaleX;
+const y=(e.clientY-rect.top)*scaleY;
+
+if(manualPoints.length<3){
+
+manualPoints.push({x,y});
+
+}
+
+if(manualPoints.length===3){
+
+const a=calculateAngle(
+manualPoints[0],
+manualPoints[1],
+manualPoints[2]
+);
+
+manualText.innerText="手動ROM "+a.toFixed(1)+"°";
+
+}
+
+});
+
+function resetManual(){
+
+manualPoints=[];
+manualText.innerText="3点タップしてください";
+
+}
+
+function onResults(results){
+
+canvas.width=video.videoWidth;
+canvas.height=video.videoHeight;
+
+ctx.clearRect(0,0,canvas.width,canvas.height);
+
+if(results.poseLandmarks){
+
+drawConnectors(ctx,results.poseLandmarks,POSE_CONNECTIONS,{color:"#00FF00"});
+drawLandmarks(ctx,results.poseLandmarks,{color:"#00FF00"});
+
+const lm=results.poseLandmarks;
+
+function get(p){
+
+return{
+x:p.x*canvas.width,
+y:p.y*canvas.height
+}
+
+}
+
+const rElbow=calculateAngle(
+get(lm[12]),
+get(lm[14]),
+get(lm[16])
+);
+
+const lElbow=calculateAngle(
+get(lm[11]),
+get(lm[13]),
+get(lm[15])
+);
+
+const rKnee=calculateAngle(
+get(lm[24]),
+get(lm[26]),
+get(lm[28])
+);
+
+const lKnee=calculateAngle(
+get(lm[23]),
+get(lm[25]),
+get(lm[27])
+);
+
+if(rElbow>maxAngles.re)maxAngles.re=rElbow;
+if(lElbow>maxAngles.le)maxAngles.le=lElbow;
+if(rKnee>maxAngles.rk)maxAngles.rk=rKnee;
+if(lKnee>maxAngles.lk)maxAngles.lk=lKnee;
+
+re.innerText=rElbow.toFixed(1);
+le.innerText=lElbow.toFixed(1);
+rk.innerText=rKnee.toFixed(1);
+lk.innerText=lKnee.toFixed(1);
+
+}
+
+manualPoints.forEach((p,i)=>{
+
+ctx.fillStyle="red";
+
+ctx.beginPath();
+ctx.arc(p.x,p.y,8,0,Math.PI*2);
+ctx.fill();
+
+ctx.fillStyle="white";
+ctx.fillText(i+1,p.x-3,p.y+3);
+
+});
+
+}
+
+const pose=new Pose({
+
+locateFile:(file)=>`https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+
+});
+
+pose.setOptions({
+
+modelComplexity:1,
+smoothLandmarks:true,
+minDetectionConfidence:0.5
+
+});
+
+pose.onResults(onResults);
+
+navigator.mediaDevices.getUserMedia({
+
+video:{facingMode:"environment"}
+
+}).then(stream=>{
+
+video.srcObject=stream;
+
+});
+
+const camera=new Camera(video,{
+
+onFrame:async()=>{
+
+await pose.send({image:video});
+
+},
+
+width:640,
+height:480
+
+});
+
+camera.start();
+
+</script>
+
+</body>
+
+</html>
